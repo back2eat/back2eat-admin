@@ -1,11 +1,14 @@
 "use client";
+// ADMIN PANEL (Next.js)
+// app/restaurants/page.js
+
 import { useEffect, useState } from "react";
-import { getRestaurants, approveRestaurant, suspendRestaurant, updatePlan } from "@/lib/api";
+import { getRestaurants, approveRestaurant, suspendRestaurant, updatePlan, renewSubscription } from "@/lib/api";
 import AdminLayout from "@/components/AdminLayout";
 import Header from "@/components/Header";
 import Badge from "@/components/Badge";
 import Pagination from "@/components/Pagination";
-import { CheckCircle, XCircle, RefreshCw, Eye, Search } from "lucide-react";
+import { CheckCircle, XCircle, RefreshCw, Eye, Search, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 
@@ -18,6 +21,8 @@ export default function RestaurantsPage() {
   const [totalPages,  setTotalPages]  = useState(1);
   const [actionId,    setActionId]    = useState(null);
   const [confirmId,   setConfirmId]   = useState(null);
+  const [renewId,     setRenewId]     = useState(null); // for renew confirm modal
+  const [renewPlan,   setRenewPlan]   = useState("");
   const LIMIT = 15;
 
   const fetchRestaurants = async () => {
@@ -56,7 +61,6 @@ export default function RestaurantsPage() {
     finally { setActionId(null); }
   };
 
-  // Decline = suspend the pending restaurant (no hard-delete endpoint in API)
   const handleDecline = async (id) => {
     setConfirmId(null);
     setActionId(id);
@@ -76,6 +80,23 @@ export default function RestaurantsPage() {
     } catch { toast.error("Failed to update plan"); }
   };
 
+  const handleRenew = async () => {
+    if (!renewId) return;
+    setActionId(renewId);
+    try {
+      const res = await renewSubscription(renewId, renewPlan);
+      toast.success(res.data.message || "Subscription renewed ✓");
+      setRenewId(null);
+      fetchRestaurants();
+    } catch (err) { toast.error(err.response?.data?.message || "Failed to renew"); }
+    finally { setActionId(null); }
+  };
+
+  const openRenewModal = (restaurant) => {
+    setRenewId(restaurant._id);
+    setRenewPlan(restaurant.plan);
+  };
+
   const filtered = restaurants.filter((r) =>
     !search ||
     r.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -84,7 +105,7 @@ export default function RestaurantsPage() {
 
   return (
     <AdminLayout>
-      <Header title="Restaurants" subtitle="Approve, suspend and manage restaurant plans" />
+      <Header title="Restaurants" subtitle="Approve, suspend, manage plans and renew subscriptions" />
 
       {/* Decline confirm modal */}
       {confirmId && (
@@ -103,6 +124,38 @@ export default function RestaurantsPage() {
               <button onClick={() => handleDecline(confirmId)}
                 className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors">
                 Yes, Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Renew subscription modal */}
+      {renewId && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="text-3xl text-center mb-3">🔄</div>
+            <h3 className="text-white font-bold text-center text-lg mb-2">Renew Subscription</h3>
+            <p className="text-gray-400 text-sm text-center mb-5">
+              Select a plan and renew for another 30 days.
+            </p>
+            <div className="mb-5">
+              <label className="text-xs text-gray-400 mb-1.5 block">Plan</label>
+              <select value={renewPlan} onChange={(e) => setRenewPlan(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500">
+                {["BASIC", "STANDARD", "PREMIUM"].map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setRenewId(null)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-700 text-gray-300 text-sm font-semibold hover:bg-gray-800 transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleRenew} disabled={!!actionId}
+                className="flex-1 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-bold transition-colors">
+                {actionId ? "Renewing..." : "Renew Now"}
               </button>
             </div>
           </div>
@@ -181,11 +234,21 @@ export default function RestaurantsPage() {
                   </td>
                   <td className="px-5 py-3.5"><Badge label={r.status} /></td>
                   <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <Link href={`/restaurants/${r._id}`}
                         className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all">
                         <Eye size={14} />
                       </Link>
+
+                      {/* Renew subscription — only for approved */}
+                      {r.status === "APPROVED" && (
+                        <button onClick={() => openRenewModal(r)}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-lg text-xs font-medium border border-orange-500/20 transition-all"
+                          title="Renew Subscription">
+                          <RotateCcw size={11} /> Renew
+                        </button>
+                      )}
+
                       {r.status === "PENDING" && (
                         <>
                           <button onClick={() => handleApprove(r._id)} disabled={actionId === r._id}

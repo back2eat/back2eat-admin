@@ -3,20 +3,29 @@ import { useEffect, useState } from "react";
 import { getCoupons, createCoupon, toggleCoupon } from "@/lib/api";
 import AdminLayout from "@/components/AdminLayout";
 import Header from "@/components/Header";
-import { Plus, ToggleLeft, ToggleRight, RefreshCw, X } from "lucide-react";
+import { Plus, ToggleLeft, ToggleRight, X } from "lucide-react";
 import toast from "react-hot-toast";
 
-const EMPTY = {
-  code: "", discountType: "FLAT", discountValue: "",
-  maxDiscount: "", minOrderValue: "", usageLimit: "",
-  perUserLimit: "1", validFrom: "", validUntil: "", scope: "PLATFORM",
+// Today in YYYY-MM-DD local format for date input default
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+
+const EMPTY = () => ({
+  code: "", discountType: "PERCENT", discountValue: "",
+  maxDiscount: "", minOrderValue: "", usageLimit: "",
+  perUserLimit: "1",
+  validFrom:  todayStr(),   // ← default to today
+  validUntil: "",
+  scope: "PLATFORM",
+});
 
 export default function CouponsPage() {
   const [coupons,  setCoupons]  = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form,     setForm]     = useState(EMPTY);
+  const [form,     setForm]     = useState(EMPTY());
   const [saving,   setSaving]   = useState(false);
 
   const fetchCoupons = async () => {
@@ -34,24 +43,30 @@ export default function CouponsPage() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
+    if (!form.validUntil) { toast.error("Valid Until date is required"); return; }
     setSaving(true);
     try {
       const payload = {
         code:          form.code.toUpperCase().trim(),
         discountType:  form.discountType,
         discountValue: Number(form.discountValue),
+        // ── Send both naming conventions so backend accepts either ──────────
+        startDate:     form.validFrom  || todayStr(),
+        endDate:       form.validUntil,
+        validFrom:     form.validFrom  || todayStr(),
+        validUntil:    form.validUntil,
+        fundedBy:      form.scope,
         scope:         form.scope,
         perUserLimit:  Number(form.perUserLimit) || 1,
       };
-      if (form.maxDiscount)   payload.maxDiscount   = Number(form.maxDiscount);
-      if (form.minOrderValue) payload.minOrderValue = Number(form.minOrderValue);
-      if (form.usageLimit)    payload.usageLimit    = Number(form.usageLimit);
-      if (form.validFrom)     payload.validFrom     = form.validFrom;
-      if (form.validUntil)    payload.validUntil    = form.validUntil;
+      if (form.maxDiscount)   payload.maxDiscount    = Number(form.maxDiscount);
+      if (form.minOrderValue) payload.minOrderAmount = Number(form.minOrderValue);
+      if (form.usageLimit)    payload.usageLimit     = Number(form.usageLimit);
+
       await createCoupon(payload);
       toast.success("Coupon created ✓");
       setShowForm(false);
-      setForm(EMPTY);
+      setForm(EMPTY());
       fetchCoupons();
     } catch (err) { toast.error(err.response?.data?.message || "Failed"); }
     finally { setSaving(false); }
@@ -70,7 +85,7 @@ export default function CouponsPage() {
         title="Coupons"
         subtitle={`${coupons.length} coupons`}
         actions={
-          <button onClick={() => setShowForm(true)}
+          <button onClick={() => { setForm(EMPTY()); setShowForm(true); }}
             className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
             <Plus size={15} /> New Coupon
           </button>
@@ -92,7 +107,9 @@ export default function CouponsPage() {
               {loading ? (
                 [...Array(5)].map((_, i) => (
                   <tr key={i}>{[...Array(8)].map((_, j) => (
-                    <td key={j} className="px-5 py-4"><div className="h-4 bg-gray-800 rounded animate-pulse" /></td>
+                    <td key={j} className="px-5 py-4">
+                      <div className="h-4 bg-gray-800 rounded animate-pulse" />
+                    </td>
                   ))}</tr>
                 ))
               ) : coupons.length === 0 ? (
@@ -108,27 +125,36 @@ export default function CouponsPage() {
                   </td>
                   <td className="px-5 py-3.5">
                     <p className="text-white font-semibold text-sm">
-                      {c.discountType === "FLAT" ? `₹${c.discountValue}` : `${c.discountValue}%`}
+                      {c.discountType === "FLAT" || c.discountType === "FIXED"
+                        ? `₹${c.discountValue}` : `${c.discountValue}%`}
                     </p>
-                    {c.maxDiscount && <p className="text-gray-500 text-xs">max ₹{c.maxDiscount}</p>}
+                    {c.maxDiscount && (
+                      <p className="text-gray-500 text-xs">max ₹{c.maxDiscount}</p>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 text-gray-300 text-sm">
-                    {c.minOrderValue ? `₹${c.minOrderValue}` : "—"}
+                    {c.minOrderAmount ? `₹${c.minOrderAmount}` : "—"}
                   </td>
                   <td className="px-5 py-3.5">
-                    <p className="text-gray-300 text-sm">{c.usedCount} / {c.usageLimit || "∞"}</p>
+                    <p className="text-gray-300 text-sm">
+                      {c.usageCount ?? c.usedCount ?? 0} / {c.usageLimit || "∞"}
+                    </p>
                     <p className="text-gray-500 text-xs">{c.perUserLimit}x per user</p>
                   </td>
                   <td className="px-5 py-3.5 text-gray-400 text-xs">
-                    {c.validFrom ? new Date(c.validFrom).toLocaleDateString("en-IN") : "Any"} →{" "}
-                    {c.validUntil ? new Date(c.validUntil).toLocaleDateString("en-IN") : "No expiry"}
+                    {(c.startDate || c.validFrom)
+                      ? new Date(c.startDate || c.validFrom).toLocaleDateString("en-IN")
+                      : "Any"}{" "}→{" "}
+                    {(c.endDate || c.validUntil)
+                      ? new Date(c.endDate || c.validUntil).toLocaleDateString("en-IN")
+                      : "No expiry"}
                   </td>
                   <td className="px-5 py-3.5">
                     <span className={`text-xs font-medium px-2 py-1 rounded-lg border ${
-                      c.scope === "PLATFORM"
+                      (c.fundedBy || c.scope) === "PLATFORM"
                         ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
                         : "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                    }`}>{c.scope}</span>
+                    }`}>{c.fundedBy || c.scope || "PLATFORM"}</span>
                   </td>
                   <td className="px-5 py-3.5">
                     <span className={`text-xs font-medium px-2.5 py-1 rounded-lg border ${
@@ -140,11 +166,11 @@ export default function CouponsPage() {
                     </span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <button onClick={() => handleToggle(c._id)} className="transition-colors">
+                    <button onClick={() => handleToggle(c._id)}
+                      className="transition-colors">
                       {c.isActive
                         ? <ToggleRight size={24} className="text-green-400 hover:text-green-300" />
-                        : <ToggleLeft  size={24} className="text-gray-500 hover:text-gray-300" />
-                      }
+                        : <ToggleLeft  size={24} className="text-gray-500 hover:text-gray-300" />}
                     </button>
                   </td>
                 </tr>
@@ -160,38 +186,106 @@ export default function CouponsPage() {
           <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-white font-bold text-lg">Create Coupon</h3>
-              <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-white transition-colors">
+              <button onClick={() => setShowForm(false)}
+                className="text-gray-400 hover:text-white transition-colors">
                 <X size={20} />
               </button>
             </div>
             <form onSubmit={handleCreate}>
               <div className="grid grid-cols-2 gap-4 mb-5">
-                {[
-                  { label: "Coupon Code *", key: "code",          type: "text",   placeholder: "WELCOME50",  required: true,  span: false },
-                  { label: "Scope",         key: "scope",         type: "select", options: ["PLATFORM","RESTAURANT"], span: false },
-                  { label: "Discount Type", key: "discountType",  type: "select", options: ["FLAT","PERCENT"],        span: false },
-                  { label: "Discount Value *", key: "discountValue", type: "number", placeholder: "50", required: true, span: false },
-                  { label: "Max Discount (₹)", key: "maxDiscount",   type: "number", placeholder: "Optional cap for %", span: false },
-                  { label: "Min Order (₹)",    key: "minOrderValue", type: "number", placeholder: "0",    span: false },
-                  { label: "Total Usage Limit", key: "usageLimit",   type: "number", placeholder: "Blank = unlimited", span: false },
-                  { label: "Per User Limit",   key: "perUserLimit",  type: "number", placeholder: "1",   span: false },
-                  { label: "Valid From",   key: "validFrom",  type: "date", span: false },
-                  { label: "Valid Until",  key: "validUntil", type: "date", span: false },
-                ].map(({ label, key, type, placeholder, required, options }) => (
-                  <div key={key}>
-                    <label className="text-xs text-gray-400 mb-1.5 block">{label}</label>
-                    {type === "select" ? (
-                      <select value={form[key]} onChange={(e) => f(key, e.target.value)}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500">
-                        {options.map((o) => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                    ) : (
-                      <input type={type} value={form[key]} onChange={(e) => f(key, e.target.value)}
-                        placeholder={placeholder} required={required}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500" />
-                    )}
-                  </div>
-                ))}
+
+                {/* Code */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Coupon Code *</label>
+                  <input value={form.code} onChange={(e) => f("code", e.target.value)}
+                    placeholder="WELCOME50" required
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500 uppercase" />
+                </div>
+
+                {/* Scope */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Funded By</label>
+                  <select value={form.scope} onChange={(e) => f("scope", e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500">
+                    <option value="PLATFORM">Platform (Back2Eat pays)</option>
+                    <option value="RESTAURANT">Restaurant (restaurant pays)</option>
+                  </select>
+                </div>
+
+                {/* Discount Type */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Discount Type</label>
+                  <select value={form.discountType} onChange={(e) => f("discountType", e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500">
+                    <option value="PERCENT">Percentage (%)</option>
+                    <option value="FLAT">Flat (₹)</option>
+                  </select>
+                </div>
+
+                {/* Discount Value */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">
+                    Discount Value * {form.discountType === "PERCENT" ? "(%)" : "(₹)"}
+                  </label>
+                  <input type="number" value={form.discountValue}
+                    onChange={(e) => f("discountValue", e.target.value)}
+                    placeholder={form.discountType === "PERCENT" ? "50" : "100"} required
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500" />
+                </div>
+
+                {/* Max Discount */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Max Discount ₹ (for % type)</label>
+                  <input type="number" value={form.maxDiscount}
+                    onChange={(e) => f("maxDiscount", e.target.value)}
+                    placeholder="150 (optional cap)"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500" />
+                </div>
+
+                {/* Min Order */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Min Order ₹</label>
+                  <input type="number" value={form.minOrderValue}
+                    onChange={(e) => f("minOrderValue", e.target.value)}
+                    placeholder="0"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500" />
+                </div>
+
+                {/* Usage Limit */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Total Usage Limit</label>
+                  <input type="number" value={form.usageLimit}
+                    onChange={(e) => f("usageLimit", e.target.value)}
+                    placeholder="Blank = unlimited"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500" />
+                </div>
+
+                {/* Per User Limit */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Per User Limit</label>
+                  <input type="number" value={form.perUserLimit}
+                    onChange={(e) => f("perUserLimit", e.target.value)}
+                    placeholder="1"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500" />
+                </div>
+
+                {/* Valid From — defaults to today */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Valid From</label>
+                  <input type="date" value={form.validFrom}
+                    onChange={(e) => f("validFrom", e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500" />
+                </div>
+
+                {/* Valid Until */}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Valid Until *</label>
+                  <input type="date" value={form.validUntil}
+                    onChange={(e) => f("validUntil", e.target.value)}
+                    required
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500" />
+                </div>
+
               </div>
               <div className="flex gap-3">
                 <button type="button" onClick={() => setShowForm(false)}

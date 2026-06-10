@@ -1,11 +1,14 @@
 "use client";
+// ADMIN PANEL (Next.js)
+// app/payouts/page.js
+
 import { useEffect, useState } from "react";
 import { getPayouts, processPayout } from "@/lib/api";
 import AdminLayout from "@/components/AdminLayout";
 import Header from "@/components/Header";
 import Badge from "@/components/Badge";
 import Pagination from "@/components/Pagination";
-import { RefreshCw, CheckCircle, XCircle, Loader2, IndianRupee } from "lucide-react";
+import { RefreshCw, CheckCircle, XCircle, Loader2, IndianRupee, User } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function PayoutsPage() {
@@ -25,7 +28,7 @@ export default function PayoutsPage() {
   const fetchPayouts = async () => {
     setLoading(true);
     try {
-      const res = await getPayouts({ status: filter, page, limit: LIMIT });
+      const res  = await getPayouts({ status: filter, page, limit: LIMIT });
       const list = res.data.payouts || [];
       setPayouts(list);
       setTotal(res.data.pagination?.total || 0);
@@ -45,7 +48,11 @@ export default function PayoutsPage() {
     }
     setActionId(modal._id);
     try {
-      await processPayout(modal._id, { status, transactionRef: txRef.trim(), adminNote: note.trim() });
+      await processPayout(modal._id, {
+        status,
+        transactionRef: txRef.trim(),
+        adminNote:      note.trim(),
+      });
       toast.success(`Payout marked as ${status}`);
       setModal(null); setTxRef(""); setNote("");
       fetchPayouts();
@@ -57,7 +64,7 @@ export default function PayoutsPage() {
     <AdminLayout>
       <Header
         title="Payouts"
-        subtitle="Process partner withdrawal requests"
+        subtitle="Process partner and branch manager withdrawal requests"
         actions={
           filter === "PENDING" && total > 0 ? (
             <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 rounded-xl px-3 py-1.5 text-xs font-medium">
@@ -71,7 +78,7 @@ export default function PayoutsPage() {
       {/* Filter tabs */}
       <div className="flex items-center gap-3 mb-5">
         <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1">
-          {["PENDING","PROCESSING","PROCESSED","FAILED"].map((s) => (
+          {["PENDING", "PROCESSING", "PROCESSED", "FAILED"].map((s) => (
             <button key={s} onClick={() => setFilter(s)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 filter === s ? "bg-orange-500 text-white" : "text-gray-400 hover:text-white"
@@ -91,7 +98,7 @@ export default function PayoutsPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-800">
-                {["Restaurant","Amount","Method","Payment Details","Status","Requested","Action"].map((h) => (
+                {["Restaurant / Requester", "Amount", "Method", "Payment Details", "Status", "Requested", "Action"].map((h) => (
                   <th key={h} className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3.5">{h}</th>
                 ))}
               </tr>
@@ -114,9 +121,21 @@ export default function PayoutsPage() {
                   <td className="px-5 py-3.5">
                     <p className="text-white font-medium text-sm">{p.restaurantId?.name || "—"}</p>
                     <p className="text-gray-500 text-xs">{p.restaurantId?.contactPhone}</p>
+                    {/* Show requester if branch manager */}
+                    {p.requestedByRole === "BRANCH_MANAGER" && (
+                      <div className="flex items-center gap-1 mt-1">
+                        <User size={10} className="text-blue-400" />
+                        <span className="text-blue-400 text-xs font-medium">
+                          Branch Mgr: {p.requestedBy?.name || p.requestedBy?.mobile || "—"}
+                        </span>
+                      </div>
+                    )}
+                    {p.branchId && (
+                      <p className="text-gray-600 text-xs mt-0.5">Branch ID: {String(p.branchId).slice(-6)}</p>
+                    )}
                   </td>
                   <td className="px-5 py-3.5">
-                    <p className="text-white font-bold">₹{p.amount.toLocaleString("en-IN")}</p>
+                    <p className="text-white font-bold text-sm">₹{p.amount.toLocaleString("en-IN")}</p>
                   </td>
                   <td className="px-5 py-3.5">
                     <Badge label={p.method} />
@@ -135,7 +154,7 @@ export default function PayoutsPage() {
                     )}
                   </td>
                   <td className="px-5 py-3.5"><Badge label={p.status} /></td>
-                  <td className="px-5 py-3.5 text-gray-500 text-xs">
+                  <td className="px-5 py-3.5 text-gray-500 text-xs whitespace-nowrap">
                     {new Date(p.createdAt).toLocaleDateString("en-IN")}<br />
                     {new Date(p.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                   </td>
@@ -167,6 +186,14 @@ export default function PayoutsPage() {
                 <span className="text-gray-400 text-sm">Restaurant</span>
                 <span className="text-white text-sm font-medium">{modal.restaurantId?.name}</span>
               </div>
+              {modal.requestedByRole === "BRANCH_MANAGER" && (
+                <div className="flex justify-between">
+                  <span className="text-gray-400 text-sm">Requester</span>
+                  <span className="text-blue-400 text-sm font-medium flex items-center gap-1">
+                    <User size={12} /> Branch Manager
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-gray-400 text-sm">Amount</span>
                 <span className="text-white font-bold">₹{modal.amount.toLocaleString("en-IN")}</span>
@@ -178,7 +205,9 @@ export default function PayoutsPage() {
               <div className="flex justify-between">
                 <span className="text-gray-400 text-sm">{modal.method === "UPI" ? "UPI ID" : "Account"}</span>
                 <span className="text-white text-sm font-mono">
-                  {modal.method === "UPI" ? modal.upiId : `${modal.accountNumber} · ${modal.ifscCode}`}
+                  {modal.method === "UPI"
+                    ? modal.upiId
+                    : `${modal.accountNumber} · ${modal.ifscCode}`}
                 </span>
               </div>
             </div>
@@ -198,7 +227,7 @@ export default function PayoutsPage() {
             </div>
             <div className="flex gap-2.5">
               <button onClick={() => handleProcess("PROCESSED")}
-                disabled={!txRef.trim() || actionId}
+                disabled={!txRef.trim() || !!actionId}
                 className="flex-1 flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white font-medium py-2.5 rounded-xl transition-colors text-sm">
                 {actionId ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
                 Mark Processed
