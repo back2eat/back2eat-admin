@@ -1,8 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { getRestaurantById, getRestaurantPayments, approveRestaurant, suspendRestaurant, declineRestaurant, startSubscription } from "@/lib/api";
-import AdminLayout from "@/components/AdminLayout";
+import {
+  getRestaurantById,
+  approveRestaurant,
+  suspendRestaurant,
+  renewSubscription,
+} from "@/lib/api";import AdminLayout from "@/components/AdminLayout";
 import Header from "@/components/Header";
 import Badge from "@/components/Badge";
 import {
@@ -26,11 +30,15 @@ export default function RestaurantDetailPage() {
   const [confirm,   setConfirm]   = useState(null);        // "decline" | "suspend"
 
   useEffect(() => {
-    Promise.all([getRestaurantById(id), getRestaurantPayments(id)])
-      .then(([r, p]) => {
+    getRestaurantById(id)
+      .then((r) => {
         setData(r.data);
-        setPayments(p.data);
         setSubPlan(r.data.restaurant?.plan || "BASIC");
+
+        setPayments({
+          subscription: null,
+          invoices: [],
+        });
       })
       .catch(() => toast.error("Failed to load restaurant"))
       .finally(() => setLoading(false));
@@ -51,18 +59,21 @@ export default function RestaurantDetailPage() {
   };
 
   const handleDecline = async () => {
-    setConfirm(null); setActionId("decline");
-    try { await declineRestaurant(id); toast.success("Declined & deleted"); window.location.href = "/restaurants"; }
-    catch (err) { toast.error(err.response?.data?.message || "Failed"); setActionId(null); }
+    toast.error("Decline API not implemented yet");
   };
 
   const handleStartSubscription = async () => {
     setStarting(true);
+
     try {
-      await startSubscription({ restaurantId: id, plan: subPlan });
-      toast.success(`${subPlan} subscription started`);
-    } catch (err) { toast.error(err.response?.data?.message || "Failed"); }
-    finally { setStarting(false); }
+      await renewSubscription(id, subPlan);
+
+      toast.success(`${subPlan} subscription renewed`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed");
+    } finally {
+      setStarting(false);
+    }
   };
 
   if (loading) return (
